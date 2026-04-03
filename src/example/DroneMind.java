@@ -37,10 +37,17 @@ public class DroneMind {
 
         try {
             Seq<Tile> path = Astar.pathfind(startTile, core.tile, 
-                // Función heurística de costos: (solo toma un parámetro "tile" de destino)
-                to -> {
-                    // Si es el núcleo, llegamos! Costo 0
-                    if (to.build instanceof CoreBuild) return 0f;
+                // Función heurística de costos
+                new Astar.TileHeuristic() {
+                    @Override
+                    public float cost(Tile tile) {
+                        return 0f; // Nunca será llamado si reescribimos el de abajo
+                    }
+
+                    @Override
+                    public float cost(Tile from, Tile to) {
+                        // Si es el núcleo, llegamos! Costo 0
+                        if (to.build instanceof CoreBuild) return 0f;
 
                     // Si el bloque es sólido o no caminable (muro de fábrica, agua profunda)
                     if (to.solid() || to.floor().isDeep()) {
@@ -51,31 +58,19 @@ public class DroneMind {
                     if (to.build != null && to.team() == team) {
                         // Es una cinta transportadora
                         if (to.build instanceof ConveyorBuild) {
-                            ConveyorBuild cb = (ConveyorBuild) to.build;
+                            int dir = from.relativeTo(to.x, to.y);
                             
-                            // Verificar qué material lleva
-                            boolean hasSameItem = false;
-                            boolean hasOtherItem = false;
-                            
-                            for (int i = 0; i < cb.len; i++) {
-                                if (cb.ids[i] == targetItem) {
-                                    hasSameItem = true;
-                                } else {
-                                    hasOtherItem = true;
-                                }
-                            }
-
-                            // Si lleva el MISMO material, ¡genial! unámonos a esta cinta. Costo bajísimo.
-                            if (hasSameItem && !hasOtherItem) {
-                                return -5f; // Recompensa por reusar cinta!
+                            // Si va en la misma dirección, es ideal unirse
+                            if (to.build.rotation == dir) {
+                                return -10f; 
                             } 
-                            // Si lleva un material DISTINTO, necesitamos un Cruce (Junction). Costo Medio.
-                            else if (hasOtherItem) {
+                            // Si es perpendicular, se necesita un Cruce (Junction). Penalización media.
+                            else if (to.build.rotation % 2 != dir % 2) {
                                 return 15f; 
-                            }
-                            // Si está vacía, asumimos que es nuestra o de alguien más. Costo bajo.
+                            } 
+                            // Si va en dirección opuesta, hay colisión frontal, evitar a toda costa.
                             else {
-                                return 5f; 
+                                return 80f; 
                             }
                         }
                         
@@ -85,7 +80,8 @@ public class DroneMind {
 
                     // Suelo libre
                     return 2f;
-                },
+                }
+            },
                 // Passable check
                 tile -> tile != null && tile.floor() != null
             );
@@ -105,23 +101,57 @@ public class DroneMind {
     }
 
     private static void createPlansFromPath(Seq<Tile> path, Item targetItem, Team team) {
-        // Ignorar la primera (Taladro) y última casilla (Núcleo)
-        for (int i = 1; i < path.size - 1; i++) {
+        // Encontrar el primer azulejo que esté fuera del taladro
+        int startIndex = 0;
+        while(startIndex < path.size && path.get(startIndex).build == path.get(0).build) {
+            startIndex++;
+        }
+        
+        // Encontrar el último azulejo que esté fuera del núcleo
+        int endIndex = path.size - 1;
+        while(endIndex >= 0 && path.get(endIndex).build == path.get(path.size - 1).build) {
+            endIndex--;
+        }
+
+        // Si la ruta es muy corta (pegado al núcleo)
+        if (startIndex > endIndex) return;
+
+        for (int i = startIndex; i <= endIndex; i++) {
             Tile current = path.get(i);
-            Tile next = path.get(i + 1);
+            Tile next;
+            
+            if (i < path.size - 1) {
+                next = path.get(i + 1);
+            } else {
+                next = current; // El último bloque apuntará hacia donde apuntaba antes
+            }
 
-            // Calcular rotación basándose en el siguiente Tile
+            // Calcular rotación basándose en el siguiente Tile (hacia donde vamos)
             int rotation = current.relativeTo(next.x, next.y);
+            if (rotation == -1) {
+                // Si por alguna razón es -1 (mismo tile), intentar con el núcleo
+                Tile coreTile = path.get(path.size - 1);
+                rotation = current.relativeTo(coreTile.x, coreTile.y);
+                if (rotation == -1) rotation = 0;
+            }
 
-            // Si el bloque actual YA es una cinta con un ítem DIFERENTE, ponemos un Junction
+            // Verificar si el bloque actual o plano actual es una cinta en OTRA dirección
             boolean needsJunction = false;
+            
+            // 1. Verificamos bloque ya construido en el mapa
             if (current.build instanceof ConveyorBuild && current.team() == team) {
-                ConveyorBuild cb = (ConveyorBuild) current.build;
-                for (int j = 0; j < cb.len; j++) {
-                    if (cb.ids[j] != null && cb.ids[j] != targetItem) {
-                        needsJunction = true;
-                        break;
+                if (current.build.rotation != rotation) {
+                    needsJunction = true; // Es perpendicular u opuesta, cruzar
+                }
+            }
+
+            // 2. Verificamos planos "fantasma" que otros drones están por construir
+            for (BlockPlan p : team.data().plans) {
+                if (p.x == current.x && p.y == current.y && p.block == Blocks.conveyor) {
+                    if (p.rotation != rotation) {
+                        needsJunction = true; // Cruzar con el fantasma también
                     }
+                    break;
                 }
             }
 
@@ -130,16 +160,20 @@ public class DroneMind {
             if (needsJunction) {
                 plan = new BlockPlan(current.x, current.y, (short)rotation, Blocks.junction, null);
             } else {
-                // Si la casilla está vacía o es una cinta de nuestro mismo material, la sobreescribimos / giramos.
                 plan = new BlockPlan(current.x, current.y, (short)rotation, Blocks.conveyor, null);
             }
             
-            // Verificamos si no existe ya este plan exacto en la cola
+            // Verificamos si no existe ya este plan exacto en la cola, si hay otro diferente lo borramos
             boolean found = false;
-            for (BlockPlan p : team.data().plans) {
+            for (int j = 0; j < team.data().plans.size; j++) {
+                BlockPlan p = team.data().plans.get(j);
                 if (p.x == plan.x && p.y == plan.y) {
-                    found = true;
-                    break;
+                    if (p.block != plan.block || p.rotation != plan.rotation) {
+                        team.data().plans.removeIndex(j);
+                        j--; // Ajustar índice tras borrar
+                    } else {
+                        found = true;
+                    }
                 }
             }
 

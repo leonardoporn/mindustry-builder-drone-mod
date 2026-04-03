@@ -76,10 +76,10 @@ public class ExampleJavaMod extends Mod{
         builderDrone = new UnitType("builder-drone") {{
             flying = true;
             drag = 0.05f;
-            speed = 3.5f; // Más rápidos para reaccionar antes
+            speed = 5.5f; // Más rápidos para reaccionar antes
             rotateSpeed = 19f;
-            accel = 0.12f;
-            itemCapacity = 30; // Mayor capacidad de minado
+            accel = 0.15f;
+            itemCapacity = 40; // Mayor capacidad de minado
             health = 150f;
             hitSize = 8f;
             engineOffset = 5.5f;
@@ -91,8 +91,8 @@ public class ExampleJavaMod extends Mod{
             
             // Stats para construir y minar
             mineTier = 2; // Puede minar cobre y plomo
-            mineSpeed = 2.5f; // Minado rápido
-            buildSpeed = 1.5f;
+            mineSpeed = 4.5f; // Minado muy rápido
+            buildSpeed = 5.0f; // Construcción ultra rápida
             buildBeamOffset = 4f;
 
             constructor = mindustry.gen.UnitEntity::create;
