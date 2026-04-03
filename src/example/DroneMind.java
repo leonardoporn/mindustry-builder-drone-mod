@@ -18,6 +18,26 @@ public class DroneMind {
     // Solo corre 1 cálculo por vez para no generar Lag
     private static boolean isCalculating = false;
     private static long lastCalcTime = 0;
+    
+    // Cola para procesar múltiples taladros sin ignorarlos
+    private static final Seq<mindustry.world.blocks.production.Drill.DrillBuild> pendingDrills = new Seq<>();
+
+    public static void queueDrill(mindustry.world.blocks.production.Drill.DrillBuild drill) {
+        if (!pendingDrills.contains(drill) && drill.dominantItem != null && drill.team != null) {
+            pendingDrills.add(drill);
+        }
+    }
+
+    public static void processQueue() {
+        if(isCalculating || pendingDrills.isEmpty() || System.currentTimeMillis() - lastCalcTime < 1000) {
+            return;
+        }
+        
+        mindustry.world.blocks.production.Drill.DrillBuild drill = pendingDrills.remove(0);
+        if (drill != null && drill.isValid() && drill.dominantItem != null) {
+            tryBuildConveyorPath(drill.tile, drill.dominantItem, drill.team);
+        }
+    }
 
     /**
      * Intenta trazar una ruta de cintas desde un taladro hasta el núcleo.
@@ -25,11 +45,7 @@ public class DroneMind {
      * @param targetItem El ítem principal que producirá este origen
      * @param team El equipo
      */
-    public static void tryBuildConveyorPath(Tile startTile, Item targetItem, Team team) {
-        if(isCalculating || System.currentTimeMillis() - lastCalcTime < 1000) {
-            return; // Esperar 1 segundo entre cálculos globales para no congelar el juego
-        }
-
+    private static void tryBuildConveyorPath(Tile startTile, Item targetItem, Team team) {
         CoreBuild core = team.core();
         if(core == null || startTile == null || targetItem == null) return;
 

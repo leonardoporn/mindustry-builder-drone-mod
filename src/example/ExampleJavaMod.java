@@ -55,12 +55,13 @@ public class ExampleJavaMod extends Mod{
             if(!e.breaking && e.tile.build instanceof mindustry.world.blocks.production.Drill.DrillBuild) {
                 mindustry.world.blocks.production.Drill.DrillBuild drill = (mindustry.world.blocks.production.Drill.DrillBuild) e.tile.build;
                 if(drill.dominantItem != null) {
-                    Time.runTask(2f, () -> {
-                        DroneMind.tryBuildConveyorPath(e.tile, drill.dominantItem, e.team);
-                    });
+                    DroneMind.queueDrill(drill);
                 }
             }
         });
+
+        // Procesa la cola de pathfinding de cintas en cada frame para no ignorar múltiples taladros
+        Events.run(Trigger.update, DroneMind::processQueue);
     }
 
     private void spawnDrone(CoreBuild core) {
@@ -94,6 +95,7 @@ public class ExampleJavaMod extends Mod{
             mineSpeed = 4.5f; // Minado muy rápido
             buildSpeed = 5.0f; // Construcción ultra rápida
             buildBeamOffset = 4f;
+            range = 50f; // Necesario para que pueda acercarse al núcleo y entregar recursos
 
             constructor = mindustry.gen.UnitEntity::create;
             
@@ -103,6 +105,11 @@ public class ExampleJavaMod extends Mod{
             controller = u -> new mindustry.ai.types.BuilderAI() {
                 mindustry.ai.types.MinerAI miner = new mindustry.ai.types.MinerAI();
                 
+                {
+                    // Obliga a revisar la cola de construcción cada 5 ticks (muy rápido) en lugar de cada 120 ticks
+                    rebuildPeriod = 5f;
+                }
+
                 @Override
                 public void updateUnit() {
                     if (miner.unit() != unit) {
@@ -115,6 +122,12 @@ public class ExampleJavaMod extends Mod{
                 public void updateMovement() {
                     // Si el equipo tiene planos en cola o el jugador mandó a construir/reparar
                     if(unit.buildPlan() != null || unit.team.data().plans.size > 0 || unit.activelyBuilding()) {
+                        // Forzamos a que suelte el modo de minado para que vaya a construir inmediatamente
+                        if(unit.mineTile != null){
+                            unit.mineTile(null);
+                            unit.clearItem();
+                            miner.mining = false;
+                        }
                         super.updateMovement();
                     } else {
                         // Si no hay nada que construir, ponte a minar automáticamente
