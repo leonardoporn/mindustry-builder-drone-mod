@@ -105,8 +105,10 @@ public class ExampleJavaMod extends Mod{
                 
                 @Override
                 public void updateUnit() {
+                    if (miner.unit() != unit) {
+                        miner.unit(unit);
+                    }
                     super.updateUnit();
-                    miner.unit(unit);
                 }
 
                 @Override
