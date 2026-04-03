@@ -49,6 +49,18 @@ public class ExampleJavaMod extends Mod{
                 });
             }
         });
+
+        // Trigger conveyor pathfinding when a drill is placed
+        Events.on(BlockBuildEndEvent.class, e -> {
+            if(!e.breaking && e.tile.build instanceof mindustry.world.blocks.production.Drill.DrillBuild) {
+                mindustry.world.blocks.production.Drill.DrillBuild drill = (mindustry.world.blocks.production.Drill.DrillBuild) e.tile.build;
+                if(drill.dominantItem != null) {
+                    Time.runTask(2f, () -> {
+                        DroneMind.tryBuildConveyorPath(e.tile, drill.dominantItem, e.team);
+                    });
+                }
+            }
+        });
     }
 
     private void spawnDrone(CoreBuild core) {
